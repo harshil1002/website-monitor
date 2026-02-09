@@ -1,35 +1,86 @@
+# FREE TIER ONLY — No paid features. Official actions only, ubuntu-latest.
+# Every 5 min = alert within 5 min if site goes down. Public repo = unlimited free minutes.
+
 name: Website Monitor (Phase 1)
 
 on:
   schedule:
-    - cron: "*/2 * * * *" # every 2 minutes (safe for private repo free tier)
+    - cron: "*/5 * * * *"   # every 5 minutes
   workflow_dispatch:
+
+concurrency:
+  group: monitor
+  cancel-in-progress: false   # wait for current run; only one at a time (saves minutes)
 
 jobs:
   monitor:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest    # free-tier runner only
 
     steps:
-      - name: Check websites and send Discord alert
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Restore site state
+        uses: actions/cache/restore@v4
+        id: restore-state
+        with:
+          path: .monitor-state
+          key: site-state-${{ runner.os }}
+
+      - name: Restore state file for this run
+        if: steps.restore-state.outputs.cache-hit == 'true'
+        run: cp .monitor-state/site_state.json site_state.json 2>/dev/null || true
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run monitor
+        id: monitor
+        run: |
+          node monitor.js 2> monitor_stderr.txt
+          EXIT=$?
+          echo "exit=$EXIT" >> $GITHUB_OUTPUT
+          exit $EXIT
+        continue-on-error: true
+
+      - name: Save site state for next run
+        if: always()
+        run: |
+          mkdir -p .monitor-state
+          cp site_state.json .monitor-state/site_state.json 2>/dev/null || true
+
+      - name: Cache site state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .monitor-state
+          key: site-state-${{ runner.os }}
+
+      - name: Send Discord alert on failure
+        if: steps.monitor.outputs.exit == '1'
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          WEBSITES=(
-            "https://httpstat.us/500"
-            "https://google.com"
-          )
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          BODY=$(cat monitor_stderr.txt 2>/dev/null | tail -20 || echo "See job logs for details.")
+          CONTENT="🚨 **Website monitor**: one or more sites are DOWN.
 
-          for URL in "${WEBSITES[@]}"; do
-            STATUS=$(curl -o /dev/null -s -w "%{http_code}" "$URL" || echo "000")
+          $RUN_URL
 
-            if [ "$STATUS" -ne 200 ]; then
-              MESSAGE="❌ DOWN: $URL (Status: $STATUS)"
-            else
-              MESSAGE="✅ UP: $URL (Status: $STATUS)"
-            fi
+          \`\`\`
+          $BODY
+          \`\`\`"
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg c "$CONTENT" '{content: $c}')" \
+            "$DISCORD_WEBHOOK" || true
 
-            curl -H "Content-Type: application/json" \
-              -X POST \
-              -d "{\"content\": \"$MESSAGE\"}" \
-              "$DISCORD_WEBHOOK"
-          done
+      - name: Fail job if monitor found down sites
+        if: steps.monitor.outputs.exit == '1'
+        run: exit 1
