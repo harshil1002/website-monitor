@@ -40,7 +40,7 @@ jobs:
             NAME=$(echo "$SITE" | sed 's|https\?://||; s|/|_|g')
             FILE="state/$NAME.txt"
 
-            STATUS=$(curl -o /dev/null -s -w "%{http_code}" --max-time 10 "$SITE")
+            STATUS=$(curl -o /dev/null -s -w "%{http_code}" --max-time 10 "$SITE" || echo "000")
 
             if [ "$STATUS" != "200" ]; then
               if [ ! -f "$FILE" ] || grep -q "UP" "$FILE"; then
