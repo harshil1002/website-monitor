@@ -1,3 +1,5 @@
+# Scheduled runs ONLY work from the repo's DEFAULT BRANCH (e.g. main).
+# If you use another branch (e.g. development), merge this file to default and push.
 name: Website Monitor (Phase 1)
 
 on:
@@ -14,12 +16,6 @@ jobs:
     runs-on: ubuntu-latest # free-tier runner only
 
     steps:
-      - name: Check run (every 5 min)
-        run: |
-          echo "Trigger: ${{ github.event_name }}"
-          echo "Run at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo "→ Schedule runs every 5 min; check this time in logs to confirm."
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -64,6 +60,20 @@ jobs:
         with:
           path: .monitor-state
           key: site-state-${{ runner.os }}
+
+      - name: Send Discord test message (every 5 min schedule)
+        if: github.event_name == 'schedule'
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          RUN_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          CONTENT="✅ **Monitor ran** (schedule check)
+          Time: $RUN_TIME
+          → You should see this every 5 minutes if the schedule is working."
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg c "$CONTENT" '{content: $c}')" \
+            "$DISCORD_WEBHOOK" || true
 
       - name: Send Discord alert on failure
         if: steps.monitor.outcome == 'failure'
