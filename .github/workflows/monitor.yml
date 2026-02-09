@@ -1,0 +1,76 @@
+name: Website Monitor
+
+on:
+  schedule:
+    - cron: "* * * * *" # every 1 minute
+  workflow_dispatch:
+  # "https://happypet.care"
+  # "https://app.happypet.tech"
+  # "https://admin.happypet.care"
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Restore state
+        uses: actions/cache@v4
+        with:
+          path: state
+          key: site-state
+
+      - name: Create state folder
+        run: mkdir -p state
+
+      - name: Check websites
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SITES=(
+            "https://httpstat.us/500"
+            
+          )
+
+          NOW=$(date +%s)
+
+          for SITE in "${SITES[@]}"; do
+            NAME=$(echo "$SITE" | sed 's|https\?://||; s|/|_|g')
+            FILE="state/$NAME.txt"
+
+            STATUS=$(curl -o /dev/null -s -w "%{http_code}" --max-time 10 "$SITE")
+
+            if [ "$STATUS" != "200" ]; then
+              if [ ! -f "$FILE" ] || grep -q "UP" "$FILE"; then
+                echo "DOWN:$NOW" > "$FILE"
+
+                gh issue create \
+                  --title "❌ DOWN: $SITE" \
+                  --body "Site is DOWN (status: $STATUS) at $(date)" \
+                  || true
+              fi
+            else
+              if [ -f "$FILE" ] && grep -q "DOWN" "$FILE"; then
+                DOWN_TIME=$(cut -d':' -f2 "$FILE")
+                DURATION=$((NOW - DOWN_TIME))
+                MIN=$((DURATION / 60))
+
+                echo "UP" > "$FILE"
+
+                gh issue create \
+                  --title "✅ UP: $SITE" \
+                  --body "Site is UP again. Downtime: ${MIN} minutes." \
+                  || true
+              else
+                echo "UP" > "$FILE"
+              fi
+            fi
+          done
+
+      - name: Save state
+        uses: actions/cache@v4
+        with:
+          path: state
+          key: site-state
