@@ -9,6 +9,7 @@ const SITES = [
   "https://app.happypet.tech",
   "https://app.happypet.care",
   "https://www.happypet.tech",
+  "https://ppa-api.happypet.care"
 ];
 
 const STATE_FILE = "site_state.json";
