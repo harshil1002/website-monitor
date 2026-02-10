@@ -1,6 +1,6 @@
 # Scheduled runs ONLY work from the repo's DEFAULT BRANCH (e.g. main).
 # If you use another branch (e.g. development), merge this file to default and push.
-name: Website Monitor (Phase 1)
+name: Website Monitor
 
 on:
   schedule:
