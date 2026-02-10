@@ -14,6 +14,7 @@ const STATE_FILE = "site_state.json";
 const DOWN_SINCE_FILE = "down_since.json";
 const RECOVERY_REPORT_FILE = "recovery_report.json";
 const SLOW_ALERT_REPORT_FILE = "slow_alert_report.json";
+const DOWN_ALERT_REPORT_FILE = "down_alert_report.json";
 const TIMEOUT = 10000;          // 10s hard timeout
 const SLOW_THRESHOLD = 2000;    // 2s = slow
 
@@ -100,6 +101,7 @@ function run(results) {
   let alerts = [];
   const recoveries = [];
   const slowAlerts = [];
+  const newDownAlerts = [];
 
   const now = new Date();
   const checkedUrls = new Set(results.map((r) => r.url));
@@ -155,6 +157,7 @@ function run(results) {
       hasDown = true;
       if (prev !== "down") {
         alerts.push(`🚨 DOWN: ${r.url} (${r.reason})`);
+        newDownAlerts.push({ url: r.url, reason: r.reason });
       }
       // Record when it went down (if not already set, e.g. state had "down" but down_since was empty)
       if (!downSince[r.url]) {
@@ -181,6 +184,9 @@ function run(results) {
   }
   if (slowAlerts.length > 0) {
     fs.writeFileSync(SLOW_ALERT_REPORT_FILE, JSON.stringify({ slowAlerts }, null, 2));
+  }
+  if (newDownAlerts.length > 0) {
+    fs.writeFileSync(DOWN_ALERT_REPORT_FILE, JSON.stringify({ newDownAlerts }, null, 2));
   }
 
   if (alerts.length > 0) {

@@ -23,6 +23,7 @@ site_state.json
 down_since.json
 recovery_report.json
 slow_alert_report.json
+down_alert_report.json
 
 # misc
 .DS_Store

@@ -78,14 +78,15 @@ jobs:
           path: .monitor-state
           key: site-state-${{ runner.os }}
 
-      - name: Send Discord alert on failure
+      - name: Send Discord alert on failure (only when a site newly went DOWN)
         if: steps.monitor.outcome == 'failure'
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
+          if [ ! -f down_alert_report.json ]; then exit 0; fi
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           ALERT_TIME=$(TZ=Asia/Kolkata date '+%d/%m/%Y %I:%M:%S %p IST')
-          BODY=$(cat monitor_stderr.txt 2>/dev/null | tail -20 || echo "See job logs for details.")
+          BODY=$(jq -r '.newDownAlerts[] | "DOWN: " + .url + " (" + .reason + ")"' down_alert_report.json 2>/dev/null || cat monitor_stderr.txt 2>/dev/null | tail -20)
           CONTENT="🚨 **Website monitor**: one or more sites are DOWN.
           Alert time: $ALERT_TIME
 
