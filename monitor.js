@@ -17,50 +17,57 @@ const SLOW_ALERT_REPORT_FILE = "slow_alert_report.json";
 const TIMEOUT = 10000;          // 10s hard timeout
 const SLOW_THRESHOLD = 2000;    // 2s = slow
 
-// Load previous state
+// Load previous state (safe parse: corrupt file => start fresh)
 let previousState = {};
-if (fs.existsSync(STATE_FILE)) {
-  previousState = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+try {
+  if (fs.existsSync(STATE_FILE)) {
+    previousState = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+    if (typeof previousState !== "object" || previousState === null) previousState = {};
+  }
+} catch {
+  previousState = {};
 }
 
 // Load when each URL went down (for recovery duration)
 let downSince = {};
-if (fs.existsSync(DOWN_SINCE_FILE)) {
-  downSince = JSON.parse(fs.readFileSync(DOWN_SINCE_FILE, "utf8"));
+try {
+  if (fs.existsSync(DOWN_SINCE_FILE)) {
+    downSince = JSON.parse(fs.readFileSync(DOWN_SINCE_FILE, "utf8"));
+    if (typeof downSince !== "object" || downSince === null) downSince = {};
+  }
+} catch {
+  downSince = {};
+}
+
+async function checkOne(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT);
+  const start = Date.now();
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    const timeMs = Date.now() - start;
+    if (!res.ok) {
+      return { url, status: "down", reason: `HTTP ${res.status}`, timeMs };
+    }
+    if (timeMs > SLOW_THRESHOLD) {
+      return { url, status: "slow", reason: `Slow (${timeMs}ms)`, timeMs };
+    }
+    return { url, status: "up", reason: null, timeMs };
+  } catch (err) {
+    const timeMs = Date.now() - start;
+    return {
+      url,
+      status: "down",
+      reason: err.name === "AbortError" ? "Timeout" : err.message,
+      timeMs,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function checkSites(urls) {
-  const results = [];
-
-  for (const url of urls) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT);
-    const start = Date.now();
-
-    try {
-      const res = await fetch(url, { signal: controller.signal });
-      const timeMs = Date.now() - start;
-
-      if (!res.ok) {
-        results.push({ url, status: "down", reason: `HTTP ${res.status}`, timeMs });
-      } else if (timeMs > SLOW_THRESHOLD) {
-        results.push({ url, status: "slow", reason: `Slow (${timeMs}ms)`, timeMs });
-      } else {
-        results.push({ url, status: "up", reason: null, timeMs });
-      }
-    } catch (err) {
-      const timeMs = Date.now() - start;
-      results.push({
-        url,
-        status: "down",
-        reason: err.name === "AbortError" ? "Timeout" : err.message,
-        timeMs,
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
+  const results = await Promise.all(urls.map(checkOne));
   return results;
 }
 
@@ -95,7 +102,7 @@ function run(results) {
   const slowAlerts = [];
 
   const now = new Date();
-  const resolvedAt = now.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
+  const checkedUrls = new Set(results.map((r) => r.url));
 
   for (const r of results) {
     const prev = previousState[r.url];
@@ -158,8 +165,16 @@ function run(results) {
     previousState[r.url] = r.status;
   }
 
-  fs.writeFileSync(STATE_FILE, JSON.stringify(previousState, null, 2));
-  fs.writeFileSync(DOWN_SINCE_FILE, JSON.stringify(downSince, null, 2));
+  // Prune state to only URLs we still check (remove sites no longer in SITES)
+  const prunedState = {};
+  const prunedDownSince = {};
+  for (const url of checkedUrls) {
+    if (previousState[url] !== undefined) prunedState[url] = previousState[url];
+    if (downSince[url] !== undefined) prunedDownSince[url] = downSince[url];
+  }
+
+  fs.writeFileSync(STATE_FILE, JSON.stringify(prunedState, null, 2));
+  fs.writeFileSync(DOWN_SINCE_FILE, JSON.stringify(prunedDownSince, null, 2));
 
   if (recoveries.length > 0) {
     fs.writeFileSync(RECOVERY_REPORT_FILE, JSON.stringify({ recoveries }, null, 2));
