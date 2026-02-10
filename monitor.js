@@ -203,3 +203,5 @@ const results = await checkSites(SITES);
 console.log(`Check completed in ${Date.now() - checkStart}ms`);
 run(results);
 console.log(`Script total: ${Date.now() - scriptStart}ms`);
+// Force exit so Node doesn't wait for fetch keep-alive sockets (~75s timeout)
+process.exit(0);
