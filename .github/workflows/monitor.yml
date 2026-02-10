@@ -38,8 +38,22 @@ jobs:
           cp .monitor-state/site_state.json site_state.json 2>/dev/null || true
           cp .monitor-state/down_since.json down_since.json 2>/dev/null || true
 
+      - name: Restore node_modules cache
+        uses: actions/cache/restore@v4
+        id: node-cache
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package.json') }}
+
       - name: Install dependencies
         run: npm install
+
+      - name: Save node_modules cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package.json') }}
 
       - name: Run monitor
         id: monitor
