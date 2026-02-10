@@ -2,12 +2,13 @@ import fs from "fs";
 import fetch from "node-fetch";
 
 const SITES = [
-  "https://httpbin.org/status/500", // always 500 (testing site)
-  "https://google.com",
   "https://happypet.care",
+  "https://staging.happypet.care",
+  "https://admin.happypet.care",
+  "https://adminstaging.happypet.care",
   "https://app.happypet.tech",
+  "https://app.happypet.care",
   "https://www.happypet.tech",
-  
 ];
 
 const STATE_FILE = "site_state.json";
