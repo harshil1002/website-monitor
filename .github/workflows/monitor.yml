@@ -20,16 +20,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Restore site state from repo
+      - name: Restore site state from repo (no cache — reliable)
         run: |
-          git fetch origin monitor-state 2>/dev/null || true
-          git show origin/monitor-state:monitor-state/site_state.json > site_state.json 2>/dev/null || true
-          git show origin/monitor-state:monitor-state/down_since.json > down_since.json 2>/dev/null || true
-          [ -s site_state.json ] || rm -f site_state.json
-          [ -s down_since.json ] || rm -f down_since.json
+          cp monitor-state/site_state.json site_state.json 2>/dev/null || true
+          cp monitor-state/down_since.json down_since.json 2>/dev/null || true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -62,7 +57,6 @@ jobs:
           exit $EXIT
         continue-on-error: true
 
-      # Runs every 5 min (24/7). Only commit+push when state actually changed to avoid 288 pushes/day.
       - name: Save site state to repo (persist for next run)
         if: always()
         run: |
@@ -71,14 +65,9 @@ jobs:
           cp down_since.json monitor-state/down_since.json 2>/dev/null || true
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B monitor-state
           git add monitor-state/
-          if git diff --staged --quiet; then
-            echo "No state change — skip push (runs every 5 min, 24/7)"
-          else
-            git commit -m "chore: update monitor state"
-            git push -f origin monitor-state
-          fi
+          git diff --staged --quiet || git commit -m "chore: update monitor state"
+          git push
 
       - name: Send Discord alert on failure (only when a site newly went DOWN)
         if: steps.monitor.outcome == 'failure'
