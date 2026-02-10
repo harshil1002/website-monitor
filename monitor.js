@@ -2,7 +2,7 @@ import fs from "fs";
 import fetch from "node-fetch";
 
 const SITES = [
-  // "https://httpbin.org/status/500", // always 500 (testing site)
+  "https://httpbin.org/status/500", // always 500 (testing site)
   "https://google.com",
   "https://happypet.care",
   "https://app.happypet.tech",
