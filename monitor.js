@@ -197,5 +197,7 @@ function run(results) {
 
 // Run (all sites checked in parallel — total time ≈ slowest site, not sum)
 console.log(`Checking ${SITES.length} site(s) in parallel...`);
+const checkStart = Date.now();
 const results = await checkSites(SITES);
+console.log(`Check completed in ${Date.now() - checkStart}ms`);
 run(results);
