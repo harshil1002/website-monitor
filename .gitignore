@@ -20,6 +20,9 @@ package-lock.json
 # workflow cache (state persisted in Actions cache)
 .monitor-state/
 site_state.json
+down_since.json
+recovery_report.json
+slow_alert_report.json
 
 # misc
 .DS_Store

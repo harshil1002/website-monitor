@@ -34,7 +34,9 @@ jobs:
 
       - name: Restore state file for this run
         if: steps.restore-state.outputs.cache-hit == 'true'
-        run: cp .monitor-state/site_state.json site_state.json 2>/dev/null || true
+        run: |
+          cp .monitor-state/site_state.json site_state.json 2>/dev/null || true
+          cp .monitor-state/down_since.json down_since.json 2>/dev/null || true
 
       - name: Install dependencies
         run: npm install
@@ -53,6 +55,7 @@ jobs:
         run: |
           mkdir -p .monitor-state
           cp site_state.json .monitor-state/site_state.json 2>/dev/null || true
+          cp down_since.json .monitor-state/down_since.json 2>/dev/null || true
 
       - name: Cache site state
         if: always()
@@ -61,28 +64,16 @@ jobs:
           path: .monitor-state
           key: site-state-${{ runner.os }}
 
-      - name: Send Discord test message (every 5 min schedule)
-        if: github.event_name == 'schedule'
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: |
-          RUN_TIME=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          CONTENT="✅ **Monitor ran** (schedule check)
-          Time: $RUN_TIME
-          → You should see this every 5 minutes if the schedule is working."
-          curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n --arg c "$CONTENT" '{content: $c}')" \
-            "$DISCORD_WEBHOOK" || true
-
       - name: Send Discord alert on failure
         if: steps.monitor.outcome == 'failure'
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ALERT_TIME=$(TZ=Asia/Kolkata date '+%d/%m/%Y %I:%M:%S %p IST')
           BODY=$(cat monitor_stderr.txt 2>/dev/null | tail -20 || echo "See job logs for details.")
           CONTENT="🚨 **Website monitor**: one or more sites are DOWN.
+          Alert time: $ALERT_TIME
 
           \`\`\`
           $BODY
@@ -92,6 +83,44 @@ jobs:
             -d "$(jq -n --arg c "$CONTENT" '{content: $c}')" \
             "$DISCORD_WEBHOOK" || true
 
-      - name: Fail job if monitor found down sites
-        if: steps.monitor.outcome == 'failure'
-        run: exit 1
+      - name: Send Discord alert when site goes SLOW (was UP)
+        if: steps.monitor.outcome == 'success'
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          if [ ! -f slow_alert_report.json ]; then exit 0; fi
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ALERT_TIME=$(TZ=Asia/Kolkata date '+%d/%m/%Y %I:%M:%S %p IST')
+          BLOCK=$(jq -r '.slowAlerts[] | "• " + .url + "\n  - Response time: " + (.timeMs|tostring) + "ms\n  - Detected at: " + .detectedAt' slow_alert_report.json 2>/dev/null || true)
+          CONTENT="⚠️ **Website monitor**: site(s) are SLOW (was UP).
+          Alert time: $ALERT_TIME
+
+          $RUN_URL
+
+          \`\`\`
+          $BLOCK
+          \`\`\`"
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg c "$CONTENT" '{content: $c}')" \
+            "$DISCORD_WEBHOOK" || true
+
+      - name: Send Discord alert on recovery (site up again)
+        if: steps.monitor.outcome == 'success'
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          if [ ! -f recovery_report.json ]; then exit 0; fi
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          BLOCK=$(jq -r '.recoveries[] | "• " + .url + (if .recoveredFrom == "slow" then "\n  - Back to normal at " + .resolvedAt else "\n  - Incident started at " + .incidentStartedAt + "\n  - Resolved at " + .resolvedAt + "\n  - Duration " + .durationText end)' recovery_report.json 2>/dev/null || true)
+          CONTENT="✅ **Website monitor**: site(s) are UP again (was down or slow).
+
+          $RUN_URL
+
+          \`\`\`
+          $BLOCK
+          \`\`\`"
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg c "$CONTENT" '{content: $c}')" \
+            "$DISCORD_WEBHOOK" || true

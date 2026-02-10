@@ -2,8 +2,7 @@ import fs from "fs";
 import fetch from "node-fetch";
 
 const SITES = [
-  "https://httpbin.org/staus/500", // testing site
-  "https://httpbin.org/status/500", // testing site
+  "https://httpbin.org/status/500", // always 500 (testing site)
   "https://google.com",
   "https://happypet.care",
   "https://app.happypet.tech",
@@ -12,6 +11,9 @@ const SITES = [
 ];
 
 const STATE_FILE = "site_state.json";
+const DOWN_SINCE_FILE = "down_since.json";
+const RECOVERY_REPORT_FILE = "recovery_report.json";
+const SLOW_ALERT_REPORT_FILE = "slow_alert_report.json";
 const TIMEOUT = 10000;          // 10s hard timeout
 const SLOW_THRESHOLD = 2000;    // 2s = slow
 
@@ -19,6 +21,12 @@ const SLOW_THRESHOLD = 2000;    // 2s = slow
 let previousState = {};
 if (fs.existsSync(STATE_FILE)) {
   previousState = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+}
+
+// Load when each URL went down (for recovery duration)
+let downSince = {};
+if (fs.existsSync(DOWN_SINCE_FILE)) {
+  downSince = JSON.parse(fs.readFileSync(DOWN_SINCE_FILE, "utf8"));
 }
 
 async function checkSites(urls) {
@@ -56,17 +64,67 @@ async function checkSites(urls) {
   return results;
 }
 
+function formatDuration(ms) {
+  const sec = Math.floor(ms / 1000);
+  const min = Math.floor(sec / 60);
+  if (min >= 1) {
+    const s = sec % 60;
+    return s > 0 ? `${min} minute${min !== 1 ? "s" : ""} and ${s} second${s !== 1 ? "s" : ""}` : `${min} minute${min !== 1 ? "s" : ""}`;
+  }
+  return `${sec} second${sec !== 1 ? "s" : ""}`;
+}
+
+/** Format ISO date string to India time (IST) for Discord */
+function formatIST(iso) {
+  return new Date(iso).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  }) + " IST";
+}
+
 function run(results) {
   let hasDown = false;
   let alerts = [];
+  const recoveries = [];
+  const slowAlerts = [];
+
+  const now = new Date();
+  const resolvedAt = now.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
 
   for (const r of results) {
     const prev = previousState[r.url];
 
     if (r.status === "up") {
       console.log(`✅ UP: ${r.url} (${r.timeMs}ms)`);
-      if (prev && prev !== "up") {
+      // Recovery: was DOWN and is now UP
+      if (prev === "down" && downSince[r.url]) {
+        const startMs = new Date(downSince[r.url]).getTime();
+        const durationMs = now.getTime() - startMs;
+        recoveries.push({
+          url: r.url,
+          recoveredFrom: "down",
+          incidentStartedAt: formatIST(downSince[r.url]),
+          resolvedAt: formatIST(now.toISOString()),
+          durationMs,
+          durationText: formatDuration(durationMs),
+        });
+        delete downSince[r.url];
         alerts.push(`✅ RECOVERED: ${r.url} (${r.timeMs}ms)`);
+      }
+      // Recovery: was SLOW and is now UP (back to normal)
+      if (prev === "slow") {
+        recoveries.push({
+          url: r.url,
+          recoveredFrom: "slow",
+          resolvedAt: formatIST(now.toISOString()),
+        });
+        alerts.push(`✅ Back to normal: ${r.url} (was slow, now ${r.timeMs}ms)`);
       }
     }
 
@@ -74,6 +132,14 @@ function run(results) {
       console.log(`⚠️ SLOW: ${r.url} (${r.timeMs}ms)`);
       if (prev !== "slow") {
         alerts.push(`⚠️ SLOW: ${r.url} (${r.timeMs}ms)`);
+        // UP → SLOW: send Discord alert
+        if (prev === "up") {
+          slowAlerts.push({
+            url: r.url,
+            timeMs: r.timeMs,
+            detectedAt: formatIST(now.toISOString()),
+          });
+        }
       }
     }
 
@@ -83,12 +149,24 @@ function run(results) {
       if (prev !== "down") {
         alerts.push(`🚨 DOWN: ${r.url} (${r.reason})`);
       }
+      // Record when it went down (if not already set, e.g. state had "down" but down_since was empty)
+      if (!downSince[r.url]) {
+        downSince[r.url] = now.toISOString();
+      }
     }
 
     previousState[r.url] = r.status;
   }
 
   fs.writeFileSync(STATE_FILE, JSON.stringify(previousState, null, 2));
+  fs.writeFileSync(DOWN_SINCE_FILE, JSON.stringify(downSince, null, 2));
+
+  if (recoveries.length > 0) {
+    fs.writeFileSync(RECOVERY_REPORT_FILE, JSON.stringify({ recoveries }, null, 2));
+  }
+  if (slowAlerts.length > 0) {
+    fs.writeFileSync(SLOW_ALERT_REPORT_FILE, JSON.stringify({ slowAlerts }, null, 2));
+  }
 
   if (alerts.length > 0) {
     console.error("ALERTS:");
