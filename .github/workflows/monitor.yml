@@ -58,7 +58,7 @@ jobs:
       - name: Run monitor
         id: monitor
         run: |
-          node monitor.js 2> monitor_stderr.txt
+          time node monitor.js 2> monitor_stderr.txt
           EXIT=$?
           echo "exit=$EXIT" >> $GITHUB_OUTPUT
           exit $EXIT
