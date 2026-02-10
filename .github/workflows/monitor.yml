@@ -14,29 +14,23 @@ concurrency:
 jobs:
   monitor:
     runs-on: ubuntu-latest # free-tier runner only
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restore site state from repo (no cache — reliable)
+        run: |
+          cp monitor-state/site_state.json site_state.json 2>/dev/null || true
+          cp monitor-state/down_since.json down_since.json 2>/dev/null || true
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          # no cache: "npm" — package-lock.json is gitignored, so we use npm install only
 
-      - name: Restore site state
-        uses: actions/cache/restore@v4
-        id: restore-state
-        with:
-          path: .monitor-state
-          key: site-state-${{ runner.os }}
-
-      - name: Restore state file for this run
-        if: steps.restore-state.outputs.cache-hit == 'true'
-        run: |
-          cp .monitor-state/site_state.json site_state.json 2>/dev/null || true
-          cp .monitor-state/down_since.json down_since.json 2>/dev/null || true
 
       - name: Restore node_modules cache
         uses: actions/cache/restore@v4
@@ -64,19 +58,17 @@ jobs:
           exit $EXIT
         continue-on-error: true
 
-      - name: Save site state for next run
+      - name: Save site state to repo (persist for next run)
         if: always()
         run: |
-          mkdir -p .monitor-state
-          cp site_state.json .monitor-state/site_state.json 2>/dev/null || true
-          cp down_since.json .monitor-state/down_since.json 2>/dev/null || true
-
-      - name: Cache site state
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: .monitor-state
-          key: site-state-${{ runner.os }}
+          mkdir -p monitor-state
+          cp site_state.json monitor-state/site_state.json 2>/dev/null || true
+          cp down_since.json monitor-state/down_since.json 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add monitor-state/
+          git diff --staged --quiet || git commit -m "chore: update monitor state"
+          git push
 
       - name: Send Discord alert on failure (only when a site newly went DOWN)
         if: steps.monitor.outcome == 'failure'
